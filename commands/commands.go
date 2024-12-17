@@ -71,8 +71,13 @@ func init() {
         },
         "inspect": {
             Name: "explore <pokemon name>",
-            Description: "inspect a pokemon that you've caught",
+            Description: "Inspect a pokemon that you've caught",
             Execute: commandInspect,
+        },
+        "pokedex": {
+            Name: "pokedex",
+            Description: "View the pokemon currently in your pokedex",
+            Execute: commandPokedex,
         },
     }
 }
@@ -238,6 +243,15 @@ func commandInspect(config *CliCommandConfig, params ...string) error {
     fmt.Println("Types:")
     for _, Type := range details.Types {
         fmt.Printf(" -%v\n", Type.Type.Name)
+    }
+
+    return nil
+}
+
+func commandPokedex(config *CliCommandConfig, _ ...string) error {
+    fmt.Println("Your Pokedex:")
+    for name := range config.caughtPokemon {
+        fmt.Printf(" - %v\n", name)
     }
 
     return nil
