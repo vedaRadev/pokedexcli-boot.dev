@@ -15,20 +15,16 @@ func main() {
     commandConfig := commands.InitCommandConfig()
     var lastCommand commands.CliCommand
     for {
-        fmt.Print("Pokedex > ")
+        fmt.Print("\nPokedex > ")
         scanner.Scan()
         input := cleanInput(scanner.Text())
 
         if len(input) == 0 {
-            if lastCommand.Callback != nil {
-                lastCommand.Callback(&commandConfig)
+            if lastCommand.Execute != nil {
+                lastCommand.Execute(&commandConfig)
             }
-
-            continue
-        }
-
-        if command, exists := commands.Commands[input[0]]; exists {
-            command.Callback(&commandConfig)
+        } else if command, exists := commands.GetCommand(input[0]); exists {
+            command.Execute(&commandConfig)
             lastCommand = command
         } else {
             fmt.Printf("unrecognized command: %s\n", input[0])

@@ -20,7 +20,7 @@ type LocationAreas struct {
 type CliCommand struct {
     Name string
     Description string
-    Callback func(*CliCommandConfig) error
+    Execute func(*CliCommandConfig) error
 }
 
 // TODO if no file outside of this one needs to access CliCommandConfig fields, stop exporting them
@@ -36,22 +36,22 @@ func init() {
         "exit": {
             Name: "exit",
             Description: "Exit the Pokedex",
-            Callback: commandExit,
+            Execute: commandExit,
         },
         "help": {
             Name: "help",
             Description: "Displays commands and their usage information",
-            Callback: commandHelp,
+            Execute: commandHelp,
         },
         "map": {
             Name: "map",
             Description: "Display the next 20 locations in the Pokemon world",
-            Callback: commandMap,
+            Execute: commandMap,
         },
         "mapb": {
             Name: "mapb",
             Description: "Display the previous 20 locations in the Pokemon world",
-            Callback: commandMapB,
+            Execute: commandMapB,
         },
     }
 }
@@ -61,6 +61,11 @@ func InitCommandConfig() CliCommandConfig {
         NextLocationsPageUrl: "https://pokeapi.co/api/v2/location-area",
         PrevLocationsPageUrl: "",
     }
+}
+
+func GetCommand(name string) (CliCommand, bool) {
+    command, exists := Commands[name]
+    return command, exists
 }
 
 func commandExit(config *CliCommandConfig) error {
