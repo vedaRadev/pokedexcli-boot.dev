@@ -6,6 +6,7 @@ import (
     "fmt"
     "errors"
     "math/rand/v2"
+    "strings"
 
     "github.com/vedaRadev/pokedexcli-boot.dev/pokeapi"
 )
@@ -29,7 +30,6 @@ type CliCommandConfig struct {
 
 // TODO stop exporting if nothing outside of this package needs to touch this directly
 var Commands map[string]CliCommand
-var currentAreaName string = ""
 
 func init() {
     Commands = map[string]CliCommand {
@@ -68,6 +68,11 @@ func init() {
             Name: "area",
             Description: "Print your current location",
             Execute: commandArea,
+        },
+        "inspect": {
+            Name: "explore <pokemon name>",
+            Description: "inspect a pokemon that you've caught",
+            Execute: commandInspect,
         },
     }
 }
@@ -155,7 +160,7 @@ func commandExplore(config *CliCommandConfig, params ...string) error {
     locationDetails, err := pokeapi.GetLocationAreaDetails(areaName)
     if err != nil { return err }
 
-    currentAreaName = areaName
+    config.currentAreaName = areaName
     fmt.Printf("You enter %s and explore to find ", areaName)
     if len(locationDetails.PokemonEncounters) > 0 {
         fmt.Println()
@@ -171,16 +176,16 @@ func commandExplore(config *CliCommandConfig, params ...string) error {
 
 func commandCatch(config *CliCommandConfig, params ...string) error {
     if len(params) == 0 {
-        return errors.New("Command takes 1 argument: area_name")
+        return errors.New("Command takes 1 argument: pokemon_name")
     }
 
-    locationDetails, err := pokeapi.GetLocationAreaDetails(currentAreaName)
+    locationDetails, err := pokeapi.GetLocationAreaDetails(config.currentAreaName)
     if err != nil { return err }
 
-    pokemonName := params[0]
+    pokemonName := strings.ToLower(params[0])
     pokemonIsInArea := false
     for _, encounter := range locationDetails.PokemonEncounters {
-        if encounter.Pokemon.Name == pokemonName {
+        if strings.ToLower(encounter.Pokemon.Name) == pokemonName {
             pokemonIsInArea = true
             break
         }
@@ -205,11 +210,35 @@ func commandCatch(config *CliCommandConfig, params ...string) error {
 }
 
 func commandArea(config *CliCommandConfig, params ...string) error {
-    if currentAreaName == "" {
+    if config.currentAreaName == "" {
         fmt.Println("You have not entered an area yet")
     } else {
-        fmt.Printf("You are in %s\n", currentAreaName)
+        fmt.Printf("You are in %s\n", config.currentAreaName)
     }
     
+    return nil
+}
+
+func commandInspect(config *CliCommandConfig, params ...string) error {
+    if len(params) == 0 {
+        return errors.New("Command takes 1 argument: pokemon_name")
+    }
+
+    name := strings.ToLower(params[0])
+    details, exists := config.caughtPokemon[name];
+    if !exists { return fmt.Errorf("You have not caught a %s", name) }
+
+    fmt.Printf("Name: %v\n", details.Name)
+    fmt.Printf("Height: %v\n", details.Height)
+    fmt.Printf("Weight: %v\n", details.Weight)
+    fmt.Println("Stats:")
+    for _, Stat := range details.Stats {
+        fmt.Printf(" -%v: %v\n", Stat.Stat.Name, Stat.BaseStat)
+    }
+    fmt.Println("Types:")
+    for _, Type := range details.Types {
+        fmt.Printf(" -%v\n", Type.Type.Name)
+    }
+
     return nil
 }
