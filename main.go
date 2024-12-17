@@ -32,7 +32,6 @@ func main() {
     }
 }
 
-
 func cleanInput(text string) []string {
     var cleaned []string
     for _, word := range strings.Fields(text) {

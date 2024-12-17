@@ -5,8 +5,13 @@ import (
     "encoding/json"
     "os"
     "fmt"
+    "time"
+    "io"
+
+    "github.com/vedaRadev/pokedexcli-boot.dev/pokecache"
 )
 
+// TODO put pokeapi stuff into its own package?
 type LocationAreas struct {
     Count    int        `json:"count"`
     Next     *string    `json:"next"`
@@ -29,7 +34,9 @@ type CliCommandConfig struct {
     PrevLocationsPageUrl string
 }
 
+// TODO stop exporting if nothing outside of this package needs to touch this directly
 var Commands map[string]CliCommand
+var requestCache *pokecache.Cache
 
 func init() {
     Commands = map[string]CliCommand {
@@ -54,6 +61,9 @@ func init() {
             Execute: commandMapB,
         },
     }
+
+    // TODO tune this interval
+    requestCache = pokecache.NewCache(5 * time.Second)
 }
 
 func InitCommandConfig() CliCommandConfig {
@@ -84,16 +94,29 @@ func commandHelp(config *CliCommandConfig) error {
 }
 
 func getLocationAreas(config *CliCommandConfig, pageUrl string) error {
-    res, err := http.Get(pageUrl)
-    if err != nil { return err }
-    defer res.Body.Close()
+    var jsonData []byte
 
-    if res.StatusCode < 200 || res.StatusCode > 299 {
-        return fmt.Errorf("request failure - response code %s", res.Status)
+    if value, exists := requestCache.Get(pageUrl); exists {
+        jsonData = value
+    } else {
+        res, err := http.Get(pageUrl)
+        if err != nil { return err }
+        defer res.Body.Close()
+
+        if res.StatusCode < 200 || res.StatusCode > 299 {
+            return fmt.Errorf("request failure - response code %s", res.Status)
+        }
+
+        jsonData, err = io.ReadAll(res.Body)
+        if err != nil {
+            return err
+        }
+
+        requestCache.Add(pageUrl, jsonData)
     }
 
     var data LocationAreas
-    if err := json.NewDecoder(res.Body).Decode(&data); err != nil {
+    if err := json.Unmarshal(jsonData, &data); err != nil {
         return err
     }
 
