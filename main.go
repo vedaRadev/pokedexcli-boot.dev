@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-    fmt.Println("Welcome to the Pokedex!")
+    fmt.Println("Welcome to the Pokedex! Type \"help\" to see commands. Press enter with no command to rerun the previous command.")
     scanner := bufio.NewScanner(os.Stdin)
     commandConfig := commands.InitCommandConfig()
     var lastCommand commands.CliCommand

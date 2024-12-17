@@ -1,105 +1,16 @@
 package commands
 
 import (
-    "net/http"
     "encoding/json"
     "os"
     "fmt"
-    "time"
-    "io"
     "errors"
+    "math/rand/v2"
 
-    "github.com/vedaRadev/pokedexcli-boot.dev/pokecache"
+    "github.com/vedaRadev/pokedexcli-boot.dev/pokeapi"
 )
 
-// TODO put pokeapi stuff into its own package?
-type LocationAreas struct {
-    Count    int        `json:"count"`
-    Next     *string    `json:"next"`
-    Previous *string    `json:"previous"`
-    Results  []struct {
-        Name string     `json:"name"`
-        URL  string     `json:"url"`
-    } `json:"results"`
-}
 
-type LocationAreaDetails struct {
-    EncounterMethodRates []struct {
-        EncounterMethod struct {
-            Name string `json:"name"`
-            URL  string `json:"url"`
-        } `json:"encounter_method"`
-        VersionDetails []struct {
-            Rate    int `json:"rate"`
-            Version struct {
-                Name string `json:"name"`
-                URL  string `json:"url"`
-            } `json:"version"`
-        } `json:"version_details"`
-    } `json:"encounter_method_rates"`
-    GameIndex int `json:"game_index"`
-    ID        int `json:"id"`
-    Location  struct {
-        Name string `json:"name"`
-        URL  string `json:"url"`
-    } `json:"location"`
-    Name  string `json:"name"`
-    Names []struct {
-        Language struct {
-            Name string `json:"name"`
-            URL  string `json:"url"`
-        } `json:"language"`
-        Name string `json:"name"`
-    } `json:"names"`
-    PokemonEncounters []struct {
-        Pokemon struct {
-            Name string `json:"name"`
-            URL  string `json:"url"`
-        } `json:"pokemon"`
-        VersionDetails []struct {
-            EncounterDetails []struct {
-                Chance          int   `json:"chance"`
-                ConditionValues []any `json:"condition_values"`
-                MaxLevel        int   `json:"max_level"`
-                Method          struct {
-                    Name string `json:"name"`
-                    URL  string `json:"url"`
-                } `json:"method"`
-                MinLevel int `json:"min_level"`
-            } `json:"encounter_details"`
-            MaxChance int `json:"max_chance"`
-            Version   struct {
-                Name string `json:"name"`
-                URL  string `json:"url"`
-            } `json:"version"`
-        } `json:"version_details"`
-    } `json:"pokemon_encounters"`
-}
-
-func pokeApiGet(url string) ([]byte, error) {
-    var result []byte
-
-    if value, exists := requestCache.Get(url); exists {
-        result = value
-    } else {
-        res, err := http.Get(url)
-        if err != nil { return nil, err }
-        defer res.Body.Close()
-
-        if res.StatusCode < 200 || res.StatusCode > 299 {
-            return nil, fmt.Errorf("request failure - response code %s", res.Status)
-        }
-
-        result, err = io.ReadAll(res.Body)
-        if err != nil {
-            return nil, err
-        }
-
-        requestCache.Add(url, result)
-    }
-
-    return result, nil
-}
 
 type CliCommand struct {
     Name string
@@ -111,11 +22,14 @@ type CliCommand struct {
 type CliCommandConfig struct {
     NextLocationsPageUrl string
     PrevLocationsPageUrl string
+    currentAreaName string
+    // TODO Just store the name then fetch from network when inspecting?
+    caughtPokemon map[string]*pokeapi.PokemonDetails
 }
 
 // TODO stop exporting if nothing outside of this package needs to touch this directly
 var Commands map[string]CliCommand
-var requestCache *pokecache.Cache
+var currentAreaName string = ""
 
 func init() {
     Commands = map[string]CliCommand {
@@ -142,19 +56,28 @@ func init() {
         "explore": {
             // TODO need to add a Usage field?
             Name: "explore <area>",
-            Description: "Explore an area to find pokemon",
+            Description: "Enter and explore an area to find pokemon",
             Execute: commandExplore,
         },
+        "catch": {
+            Name: "catch <pokemon name>",
+            Description: "Attempt to catch a pokemon and add it to your pokedex",
+            Execute: commandCatch,
+        },
+        "area": {
+            Name: "area",
+            Description: "Print your current location",
+            Execute: commandArea,
+        },
     }
-
-    // TODO tune this interval
-    requestCache = pokecache.NewCache(5 * time.Second)
 }
 
 func InitCommandConfig() CliCommandConfig {
     return CliCommandConfig {
         NextLocationsPageUrl: "https://pokeapi.co/api/v2/location-area",
         PrevLocationsPageUrl: "",
+        currentAreaName: "",
+        caughtPokemon: map[string]*pokeapi.PokemonDetails {},
     }
 }
 
@@ -178,11 +101,11 @@ func commandHelp(config *CliCommandConfig, params ...string) error {
     return nil
 }
 
-func getLocationAreas(config *CliCommandConfig, pageUrl string) error {
-    jsonData, err := pokeApiGet(pageUrl)
+func printLocationAreas(config *CliCommandConfig, pageUrl string) error {
+    jsonData, _, err := pokeapi.Get(pageUrl)
     if err != nil { return err }
 
-    var data LocationAreas
+    var data pokeapi.LocationAreasPaged
     if err := json.Unmarshal(jsonData, &data); err != nil { return err }
 
     if data.Next != nil {
@@ -210,7 +133,7 @@ func commandMap(config *CliCommandConfig, params ...string) error {
         return nil
     }
 
-    return getLocationAreas(config, config.NextLocationsPageUrl)
+    return printLocationAreas(config, config.NextLocationsPageUrl)
 }
 
 func commandMapB(config *CliCommandConfig, params ...string) error {
@@ -219,29 +142,74 @@ func commandMapB(config *CliCommandConfig, params ...string) error {
         return nil
     }
 
-    return getLocationAreas(config, config.PrevLocationsPageUrl)
+    return printLocationAreas(config, config.PrevLocationsPageUrl)
 }
 
 func commandExplore(config *CliCommandConfig, params ...string) error {
+    // TODO if no areaName provided, just explore the player's current area
     if len(params) == 0 {
         return errors.New("Command takes 1 argument: area_name")
     }
 
     areaName := params[0]
-    jsonData, err := pokeApiGet("https://pokeapi.co/api/v2/location-area/" + areaName)
+    locationDetails, err := pokeapi.GetLocationAreaDetails(areaName)
     if err != nil { return err }
 
-    var locationDetails LocationAreaDetails
-    if err := json.Unmarshal(jsonData, &locationDetails); err != nil { return err }
-
+    currentAreaName = areaName
+    fmt.Printf("You enter %s and explore to find ", areaName)
     if len(locationDetails.PokemonEncounters) > 0 {
-        fmt.Println("Found pokemon:")
+        fmt.Println()
         for _, encounter := range locationDetails.PokemonEncounters {
             fmt.Printf(" - %s\n", encounter.Pokemon.Name)
         }
     } else {
-        fmt.Println("No pokemon found...")
+        fmt.Println("nothing.")
     }
 
+    return nil
+}
+
+func commandCatch(config *CliCommandConfig, params ...string) error {
+    if len(params) == 0 {
+        return errors.New("Command takes 1 argument: area_name")
+    }
+
+    locationDetails, err := pokeapi.GetLocationAreaDetails(currentAreaName)
+    if err != nil { return err }
+
+    pokemonName := params[0]
+    pokemonIsInArea := false
+    for _, encounter := range locationDetails.PokemonEncounters {
+        if encounter.Pokemon.Name == pokemonName {
+            pokemonIsInArea = true
+            break
+        }
+    }
+    if !pokemonIsInArea { return fmt.Errorf("%s is not in your current area!", pokemonName) }
+
+    pokemon, err := pokeapi.GetPokemon(pokemonName)
+    if err != nil { return err }
+
+    fmt.Printf("Throwing a pokeball at %s...\n", pokemonName)
+
+    // TODO need WAY better catch determination
+    didCatch := rand.IntN(pokemon.BaseExperience) < 50
+    if didCatch {
+        fmt.Printf("You caught %s!\n", pokemonName)
+        config.caughtPokemon[pokemonName] = pokemon
+    } else {
+        fmt.Printf("%s got away!\n", pokemonName)
+    }
+
+    return nil
+}
+
+func commandArea(config *CliCommandConfig, params ...string) error {
+    if currentAreaName == "" {
+        fmt.Println("You have not entered an area yet")
+    } else {
+        fmt.Printf("You are in %s\n", currentAreaName)
+    }
+    
     return nil
 }
